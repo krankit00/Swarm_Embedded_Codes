@@ -52,9 +52,9 @@ void increase_CounterB(){
 }
 
 void calculateRPM(){
-  rpm1=(ext_counterA*60)/(6.4*19);
+  rpm1=(ext_counterA*60*2.6)/(6.4*19); //Factor of 2.6 to achieve rated RPM in Serial Output.
     
-  rpm2=(ext_counterB*60)/(6.4*19);
+  rpm2=(ext_counterB*60*2.6)/(6.4*19); //Factor of 2.6 to achieve rated RPM in Serial Output.
   
   ext_counterA=0;
   ext_counterB=0;
