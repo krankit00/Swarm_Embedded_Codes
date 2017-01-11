@@ -1,4 +1,10 @@
+#include <PID_v1.h>
+
+#include <Wire.h>
 #include "TimerOne.h"
+
+#define address 0x1E //0011110b, I2C 7bit address of HMC5883
+
 
 uint32_t timer;
 
@@ -21,33 +27,30 @@ volatile bool direction_rotation=true;
 volatile int motion_counter=0;
 
 //Initialise Ki, Kp, Kd
-const float kpA=4.0;
-const float kiA=0.06;
-const float kdA=0.5;
+const double kpA=4.0;
+const double kiA=0.06;
+const double kdA=0.5;
 
-const float kpB=4.0;
-const float kiB=0.06;
-const float kdB=0.5;
+const double kpB=4.0;
+const double kiB=0.06;
+const double kdB=0.5;
+
 
 //Definations for rpm
-const float max_rpmA=301.0;
-volatile float curr_errorA;
-volatile float prev_errorA=0.0;
-volatile float sum_errorA=0.0;
-volatile float diff_errorA=0.0;
-volatile float set_rpmA=80.0;
-volatile float curr_rpmA=0;
+const double max_rpmA=301.0;
+volatile double set_rpmA=80.0;
+volatile double curr_rpmA=0;
 
-const float max_rpmB=307.0;
-volatile float curr_errorB;
-volatile float prev_errorB=0.0;
-volatile float sum_errorB=0.0;
-volatile float diff_errorB=0.0;
-volatile float set_rpmB=80.0;
-volatile float curr_rpmB=0;
+const double max_rpmB=307.0;
+volatile double set_rpmB=80.0;
+volatile double curr_rpmB=0;
 
-volatile int PWMA;
-volatile int PWMB;
+volatile double PWMA;
+volatile double PWMB;
+
+PID PID_MotorA(&curr_rpmA, &PWMA, &set_rpmA,kpA,kiA,kdA, DIRECT);
+PID PID_MotorB(&curr_rpmB, &PWMB, &set_rpmB,kpB,kiB,kdB, DIRECT);
+
 
 //Definations for localisation
 volatile float sys_dist=0.0;
@@ -119,15 +122,40 @@ void brake() {
 }
 
 float get_theta(){
-  float t=0.0;
-  //Use magnetometer to set t. Amit, your code from here.
+  int x,y,z; //triple axis data
+
+  //Tell the HMC5883L where to begin reading data
+  Wire.beginTransmission(address);
+  Wire.write(0x03); //select register 3, X MSB register
+  Wire.endTransmission();
   
-  return t;
+ //Read data from each axis, 2 registers per axis
+  Wire.requestFrom(address, 6);
+  if(6<=Wire.available()){
+    x = Wire.read()<<8; //X msb
+    x |= Wire.read(); //X lsb
+    z = Wire.read()<<8; //Z msb
+    z |= Wire.read(); //Z lsb
+    y = Wire.read()<<8; //Y msb
+    y |= Wire.read(); //Y lsb
+  }   
+  return x;
 }
 
-
 void setup() {
-  // put your setup code here, to run once
+  /* MAGNETOMETER SETUP */
+  
+  //Initialize Serial and I2C communications
+  Serial.begin(115200);
+  Wire.begin();
+  
+  //Put the HMC5883 IC into the correct operating mode
+  Wire.beginTransmission(address); //open communication with HMC5883
+  Wire.write(0x02); //select mode register
+  Wire.write(0x00); //continuous measurement mode
+  Wire.endTransmission();
+
+  /* MOTOR AND ENCODER SETUP */
 
   //Set pin input and pulldown it.
   pinMode(interruptEncoderPinA, INPUT);
@@ -152,49 +180,19 @@ void setup() {
 
   //start a timer
   timer = micros();
+
+  /* PID SETUP */
+  PID_MotorA.SetMode(AUTOMATIC);
+  PID_MotorB.SetMode(AUTOMATIC);
+  
 }
 
 void loop() {
   
-  if(motion_counter<40){
-    forward();
-  }
-  else if(motion_counter<80){
-    rightTurn();
-  }  
-  else if(motion_counter<120){
-    leftTurn();
-  }  
-  else if(motion_counter<160){
-    backward();
-  } 
-  else
-    motion_counter=0;
-
-  
-  //Calculate errors and other terms
-  curr_errorA= set_rpmA - curr_rpmA;
-  diff_errorA= prev_errorA - curr_errorA;
-  sum_errorA+=curr_errorA;
-
-  curr_errorB= set_rpmB - curr_rpmB;
-  diff_errorB= prev_errorB - curr_errorB;
-  sum_errorB+=curr_errorB;
-  
-  //Apply PWM accordingly.
-  PWMA=(int)(((set_rpmA+(kpA*curr_errorA)+(kiA*sum_errorA)+(kdA*diff_errorA))*256)/max_rpmA);
-  PWMB=(int)(((set_rpmB+(kpB*curr_errorB)+(kiB*sum_errorB)+(kdB*diff_errorB))*256)/max_rpmB);
-  PWMA = PWMA < 0? 0 :PWMA;  
-  PWMB = PWMB< 0 ? 0 : PWMB;
-  PWMA=(PWMA>255)?255:PWMA;
-  PWMB=(PWMB>255)?255:PWMB;
-
+  PID_MotorA.Compute();
+  PID_MotorB.Compute();
   analogWrite(PWMOutputMotorA,PWMA);
   analogWrite(PWMOutputMotorB,PWMB);
-
-  //Update the error value.
-  prev_errorA= curr_errorA;
-  prev_errorB= curr_errorB;
 
   Serial.print("X: "); Serial.print(curr_pos_x);
   Serial.print(" Y: "); Serial.println(curr_pos_y);
